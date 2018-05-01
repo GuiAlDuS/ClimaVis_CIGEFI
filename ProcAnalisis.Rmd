@@ -1,0 +1,132 @@
+---
+title: "Preparación de datos para visualizaciones de GCMs - cantones y distritos"
+author: "Guillermo A. Durán"
+output: github_document
+---
+Preparación de los datos para visualización.
+
+Paquetes utilizados
+```{r}
+library(sf)
+library(tidyverse)
+library(rgdal)
+library(scales)
+```
+
+
+Leer datos de WFS con cantones y distritos del WFS del SNIT escala 1:5000 usando el paquete rgdal
+
+URL del WFS del SNIT con datos escala 1:5000
+
+```{r}
+dsn <- "WFS:http://geos.snitcr.go.cr/be/IGN_25/wfs?"
+```
+
+Lista de todas las capas dentro de ese WFS
+```{r}
+ogrListLayers(dsn)
+```
+
+Descarga y creación de SF para distritos y cantones
+```{r}
+distritos <- st_read(dsn, "IGN_25:limitedistrital_25k")
+cantones <- st_read(dsn, "IGN_25:limitecantonal_25k")
+```
+
+Graficar cantones para corroborar que datos se hayan descargado bien
+```{r}
+ggplot() + geom_sf(data = cantones)
+```
+
+A pesar de los pasos anteriores, se decidió hacer la selección usando QGIS para únicamente seleccionar los cantones con casi la totalidad del área cubierta por las celdas ("select by location" y ajuste visual). 
+Ahora cargar json con distritos y cantones seleccionados además de celdas con datos
+```{r}
+
+distritos <- st_read("SIG/DistritosChorotega.geojson")
+cantones <- st_read("SIG/CantonesChorotega.geojson")
+celdas <- st_read("SIG/CeldasUbicaciones.geojson")
+```
+
+Seleccionar celdas por cada cantón
+```{r}
+seleccionCantones <- st_intersection(cantones, celdas) %>% 
+  select(canton, id)
+```
+
+Contar celdas por cada cantón
+```{r}
+cant_summ <- seleccionCantones %>% group_by(canton) %>% summarise(n())
+cant_summ
+```
+
+Ojo que hay "suficiente" cantidad de celdas por cada cantón. Ahora a revisar por distrito.
+```{r}
+seleccionDistritos <- st_intersection(distritos,celdas) %>% 
+  select(nombre, nom_cant, id)
+```
+
+Contar celdas por cada distrito
+```{r}
+dist_summ <- seleccionDistritos %>% group_by(nombre, nom_cant) %>% summarise("celdas" = n()) %>% arrange(celdas) %>% select(nombre, nom_cant, celdas)
+
+dist_summ
+```
+
+Graficarlo en histograma
+```{r}
+test <- seleccionDistritos %>% group_by(nombre) %>% summarise("celdas" = n())
+ggplot(test, aes(celdas)) + geom_histogram(binwidth = 1) + scale_y_continuous(breaks= pretty_breaks())
+```
+
+Guardar tablas de seleccion
+```{r}
+write_csv(seleccionCantones, "seleccionCantones.csv")
+write_csv(seleccionDistritos, "seleccionDistritos.csv")
+```
+
+
+Crear listas de cantones y distritos por canton:
+```{r}
+cant_summ$canton <- str_to_title(as.character(cant_summ$canton))
+dist_summ$nombre <- str_to_title(as.character(dist_summ$nombre))
+dist_summ <- data.frame(distrito = dist_summ$nombre, canton = dist_summ$nom_cant)
+```
+
+Guardar tabla con distritos por cantón:
+```{r}
+write_csv(dist_summ, "distritos_cantones.csv")
+```
+
+#Creación de tablas con valores anuales para cada distrito
+
+Cargar datos de GCMs crudos
+```{r}
+tbl_month <- readRDS("mensual_CIGEFI_raw.rds")
+```
+
+Union de tablas para agregar indicador de celdas a datos mensuales
+```{r}
+tbl_month_id <- tbl_month %>% left_join(celdas, by = c("Latitude" = "Lon", "Longitude" = "Lat")) #ojo que la Lat y Lon de los datos originales están invertidos y siguen invertidos
+tbl_month_id <- data.frame(Year = tbl_month_id$Year, 
+                           Month = tbl_month_id$Month, 
+                           Model = tbl_month_id$Model, 
+                           Scenario = tbl_month_id$Scenario, 
+                           tas_month = tbl_month_id$tas_month,
+                           pr_month = tbl_month_id$pr_month, 
+                           id = tbl_month_id$id)
+```
+
+
+Preparación de tabla con promedios anuales para cada distrito
+```{r}
+valores_distritos <- tbl_month_id %>% left_join(seleccionDistritos, by = "id") %>% group_by(Year, Model, Scenario, nombre) %>% summarise(t_mean = mean(tas_month), p_mean = mean(pr_month))
+```
+
+Arreglar nombres y salvar tabla
+```{r}
+valores_distritos$nombre <- str_to_title(as.character(valores_distritos$nombre))
+valores_distritos <- rename(valores_distritos, distrito = nombre)
+
+write_csv(valores_distritos, "val_distritos.csv")
+```
+
