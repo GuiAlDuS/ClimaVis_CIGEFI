@@ -1,12 +1,17 @@
 #Paquetes necesarios
 library(shinydashboard)
 library(shinyWidgets)
-library(data.table)
+library(magrittr)
+library(dplyr)
 library(leaflet)
+library(ggplot2)
+library(ggiraph)
+library(data.table)
 
 #Archivos y datos de entrada
 dist_cant <- fread("distritos_cantones.csv")
 val_distritos <- fread("val_distritos.csv")
+val_distritos_mes <- data.table(readRDS("val_distritos_mes.rds"))
 
 GCMs <- list("ccsm4_r1i1p1", 
      "ccsm4_r2i1p1", 
@@ -29,7 +34,7 @@ ui <- dashboardPage(
   skin = "blue",
   dashboardHeader(
     title = "Cambio climático en la Región Chorotega",
-    titleWidth = 400
+    titleWidth = 450
   ),
   dashboardSidebar(
     disable = TRUE
@@ -65,10 +70,9 @@ ui <- dashboardPage(
       tabBox(
         side = "right",
         title = "Temperatura", id = "temperatura", width = 7, selected = "Anual", 
-        tabPanel("Mensual",
-                 conditionalPanel("input.aNo >=5", plotOutput("Tmes"))
+        tabPanel("Mensual", ggiraphOutput("Tmes")
                  ),
-        tabPanel("Anual", plotOutput("TaNo")
+        tabPanel("Anual", ggiraphOutput("TaNo")
         )
         )
       ),
@@ -85,8 +89,7 @@ ui <- dashboardPage(
       tabBox(
         side = "right",
         title = "Lluvia", id = "precip", width = 7, selected = "Anual",
-      tabPanel("Mensual",
-               conditionalPanel("input.aNo >= 5", plotOutput("Pmes"))
+      tabPanel("Mensual", ggiraphOutput("Pmes")
                ),
       tabPanel("Anual",
                plotOutput("PaNo")
@@ -112,25 +115,101 @@ server <- function(input, output) {
   
   
   #funciones de selección
-  seleccion <- reactive({val_distritos[distrito == input$distritos &
-                                          Scenario == input$cp & 
-                                          Model %in% input$modelos &
-                                          Year >= input$aNo[1] & 
-                                          Year <= input$aNo[2]]
-    })
+  seleccion <- reactive({
+    val_distritos[distrito == input$distritos &
+                    Scenario == input$cp & 
+                    Model %in% input$modelos &
+                    Year >= input$aNo[1] & 
+                    Year <= input$aNo[2]]
+  })
   
-  #seleccion <- val_distritos[distrito == "Las Juntas" &
-   #                            Scenario == "rpc45" &
-    #                           Model == "ccsm4_r1i1p1" &
-     #                          Year >= 2030 & Year <= 2060
-      #                       ]
+  sel_mes <- reactive({
+    val_distritos_mes[distrito == input$distritos &
+                        Model %in% input$modelos &
+                        Scenario == input$cp & 
+                        Year >= input$aNo[1] & Year <= input$aNo[2]]
+  })
+  
+#  dd <- sel_mes()
+  t_outliers <- reactive ({
+    sel_mes() %>% 
+      group_by(Month) %>% 
+      mutate(Q1 = quantile(t_mean, probs = 0.25),
+             Q3 = quantile(t_mean, probs = 0.75),
+             IQR = Q3 - Q1,
+             upper.limit = Q3+1.5*IQR,
+             lower.limit = Q1-1.5*IQR) %>%
+      filter(t_mean > upper.limit | t_mean < lower.limit) %>% 
+      mutate(tooltip = paste0("Año ", Year))
+  })
+  
+  p_outliers <- reactive ({
+    sel_mes() %>% 
+      group_by(Month) %>% 
+      mutate(Q1 = quantile(p_mean, probs = 0.25),
+             Q3 = quantile(p_mean, probs = 0.75),
+             IQR = Q3 - Q1,
+             upper.limit = Q3+1.5*IQR,
+             lower.limit = Q1-1.5*IQR) %>%
+      filter(p_mean > upper.limit | p_mean < lower.limit) %>% 
+      mutate(tooltip = paste0("Año ", Year))
+  })
+  
+  #outliers$tooltip <- c(paste0("Año ", outliers$Year))
   
   #graficos
-  output$TaNo <- renderPlot({
-    ggplot() + geom_line(data = seleccion(), aes(x = Year, y = t_mean, colour = Model)) + 
-      labs(x = "Años", y = "Temperatura (C)") + 
-      scale_colour_discrete(name="Modelos")
+  output$TaNo <- renderggiraph({
+    g <- ggplot() + 
+      geom_boxplot_interactive(data = seleccion(), aes(x = Year, y = t_mean_y, group = Year, tooltip = Model, data_id = Model), fill = "lightyellow") +
+      #      geom_line(data = seleccion(), aes(x = Year, y = t_mean_y, colour = Model), alpha = 0.6) +
+      labs(x = "Años", y = "Promedio de temperatura (C)") + 
+      scale_colour_discrete(name="Modelos") +
+      theme(legend.position = "bottom")
+    ggiraph(code = print(g),
+            hover_css = "fill:red;cursor:pointer;",
+            selection_type = "single",
+            selected_css = "fill:red;", width = 1)
     })
+  
+  output$Tmes <- renderggiraph({
+    g_temp <- ggplot() + 
+      geom_boxplot(data = sel_mes(), aes(x = Month, y = t_mean, group = Month), outlier.shape = NA, fill = "lightyellow") +
+      geom_point_interactive(data = t_outliers(), 
+                             aes(x = Month, y = t_mean, colour = Model, 
+                                 group = Month, tooltip = t_outliers()$tooltip), alpha = 0.7) +
+      scale_x_continuous(breaks=seq(1,12,1), labels=c("Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Set","Oct","Nov","Dic")) +
+      labs(x = "Mes", y = "Promedio de temperatura (C)") +
+      scale_colour_discrete(name="Modelos") +
+      theme(legend.position = "bottom")
+    ggiraph(code = print(g_temp), zoom_max = 2)
+  })
+  
+  output$PaNo <- renderPlot({
+    ggplot() + 
+      labs(x = "Años", y = "Total de lluvia (mm)") +
+      geom_boxplot(data = seleccion(), aes(x = Year, y = p_y, group = Year), fill = "lightyellow") +
+#      geom_line(data = seleccion(), aes(x = Year, y = p_y, colour = Model), alpha = 0.6) +
+      scale_colour_discrete(name="Modelos") +
+      theme(legend.position = "bottom")
+  })
+  
+  output$Pmes <- renderggiraph({
+    g_prec <- ggplot() + 
+      geom_boxplot(data = sel_mes(), aes(x = Month, y = p_mean, group = Month), outlier.shape = NA, fill = "lightyellow") +
+      geom_point_interactive(data = p_outliers(), 
+                             aes(x = Month, y = p_mean, colour = Model, 
+                                 group = Month, tooltip = p_outliers()$tooltip), alpha = 0.7) +
+      scale_x_continuous(breaks=seq(1,12,1), labels=c("Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Set","Oct","Nov","Dic")) +
+      labs(x = "Mes", y = "Total de lluvia (mm)") +
+      scale_colour_discrete(name="Modelos") +
+      theme(legend.position = "bottom")
+    ggiraph(code = print(g_prec), zoom_max = 2)
+  })
+  
+  output$mapaTemp <- renderggiraph({
+    mTemp <- ggplot() +
+      ggmap
+  })
 }
 
 

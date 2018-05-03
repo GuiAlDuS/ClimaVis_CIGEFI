@@ -117,9 +117,15 @@ tbl_month_id <- data.frame(Year = tbl_month_id$Year,
 ```
 
 
-Preparación de tabla con promedios anuales para cada distrito
+Preparación de tabla con promedios anuales para cada distrito. 
+Ojo que acá hay que primero promediar la lluvia por mes y luego sumarla a años.
 ```{r}
-valores_distritos <- tbl_month_id %>% left_join(seleccionDistritos, by = "id") %>% group_by(Year, Model, Scenario, nombre) %>% summarise(t_mean = mean(tas_month), p_mean = mean(pr_month))
+valores_distritos <- tbl_month_id %>% 
+  left_join(seleccionDistritos, by = "id") %>% 
+  group_by(Year, Month, Model, Scenario, nombre) %>% 
+  summarise(t_mean = mean(tas_month), p_mean = mean(pr_month)) %>% 
+  group_by(Year, Model, Scenario, nombre) %>% 
+  summarise(t_mean_y = mean(t_mean), p_y = sum(p_mean))
 ```
 
 Arreglar nombres y salvar tabla
@@ -128,5 +134,21 @@ valores_distritos$nombre <- str_to_title(as.character(valores_distritos$nombre))
 valores_distritos <- rename(valores_distritos, distrito = nombre)
 
 write_csv(valores_distritos, "val_distritos.csv")
+```
+
+#Creación de tablas con valores mensuales para cada distrito
+
+```{r}
+valores_distritos_mes <- tbl_month_id %>% 
+  left_join(seleccionDistritos, by = "id") %>% 
+  group_by(Year, Month, Model, Scenario, nombre) %>% 
+  summarise(t_mean = mean(tas_month), p_mean = mean(pr_month))
+```
+
+Guardar tabla
+```{r}
+valores_distritos_mes$nombre <- str_to_title(as.character(valores_distritos_mes$nombre))
+valores_distritos_mes <- rename(valores_distritos_mes, distrito = nombre)
+saveRDS(valores_distritos_mes, "val_distritos_mes.rds")
 ```
 
