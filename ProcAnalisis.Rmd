@@ -6,11 +6,12 @@ output: github_document
 Preparación de los datos para visualización.
 
 Paquetes utilizados
-```{r}
+```{r include=FALSE}
 library(sf)
 library(tidyverse)
 library(rgdal)
 library(scales)
+library(mapview)
 ```
 
 
@@ -62,12 +63,12 @@ cant_summ
 Ojo que hay "suficiente" cantidad de celdas por cada cantón. Ahora a revisar por distrito.
 ```{r}
 seleccionDistritos <- st_intersection(distritos,celdas) %>% 
-  select(nombre, nom_cant, id)
+  select(nombre, coddistful, nom_cant, id)
 ```
 
 Contar celdas por cada distrito
 ```{r}
-dist_summ <- seleccionDistritos %>% group_by(nombre, nom_cant) %>% summarise("celdas" = n()) %>% arrange(celdas) %>% select(nombre, nom_cant, celdas)
+dist_summ <- seleccionDistritos %>% group_by(nombre, coddistful, nom_cant) %>% summarise("celdas" = n()) %>% arrange(nombre) %>% select(nombre, coddistful, nom_cant, celdas)
 
 dist_summ
 ```
@@ -78,24 +79,32 @@ test <- seleccionDistritos %>% group_by(nombre) %>% summarise("celdas" = n())
 ggplot(test, aes(celdas)) + geom_histogram(binwidth = 1) + scale_y_continuous(breaks= pretty_breaks())
 ```
 
-Guardar tablas de seleccion
-```{r}
-write_csv(seleccionCantones, "seleccionCantones.csv")
-write_csv(seleccionDistritos, "seleccionDistritos.csv")
-```
-
-
 Crear listas de cantones y distritos por canton:
 ```{r}
-cant_summ$canton <- str_to_title(as.character(cant_summ$canton))
 dist_summ$nombre <- str_to_title(as.character(dist_summ$nombre))
-dist_summ <- data.frame(distrito = dist_summ$nombre, canton = dist_summ$nom_cant)
+cant_summ$canton <- str_to_title(as.character(cant_summ$canton))
+dist_summ <- data.frame(distrito = dist_summ$nombre, canton = dist_summ$nom_cant, coddistful = dist_summ$coddistful)
 ```
 
 Guardar tabla con distritos por cantón:
 ```{r}
 write_csv(dist_summ, "distritos_cantones.csv")
 ```
+
+Crear geojson con distritos con datos y guardarlo
+```{r}
+distritos_mapa <- distritos %>% 
+  select(nombre, canton, coddistful, geometry) %>% 
+  right_join(dist_summ, by = "coddistful") %>% 
+  select(nombre, canton.y, coddistful, geometry) %>% 
+    rename(distrito = nombre, canton = canton.y)
+
+distritos_mapa$canton <- str_to_title(as.character(distritos_mapa$canton))
+distritos_mapa$distrito <- str_to_title(as.character(distritos_mapa$distrito))
+
+st_write(distritos_mapa, "distritos_mapa.json", driver = "GeoJSON")
+```
+
 
 #Creación de tablas con valores anuales para cada distrito
 
@@ -122,18 +131,18 @@ Ojo que acá hay que primero promediar la lluvia por mes y luego sumarla a años
 ```{r}
 valores_distritos <- tbl_month_id %>% 
   left_join(seleccionDistritos, by = "id") %>% 
-  group_by(Year, Month, Model, Scenario, nombre) %>% 
+  group_by(Year, Month, Model, Scenario, nombre, nom_cant, coddistful) %>% 
   summarise(t_mean = mean(tas_month), p_mean = mean(pr_month)) %>% 
-  group_by(Year, Model, Scenario, nombre) %>% 
+  group_by(Year, Model, Scenario, nombre, nom_cant, coddistful) %>% 
   summarise(t_mean_y = mean(t_mean), p_y = sum(p_mean))
 ```
 
 Arreglar nombres y salvar tabla
 ```{r}
 valores_distritos$nombre <- str_to_title(as.character(valores_distritos$nombre))
-valores_distritos <- rename(valores_distritos, distrito = nombre)
+valores_distritos <- valores_distritos %>% rename(distrito = nombre, canton = nom_cant)
 
-write_csv(valores_distritos, "val_distritos.csv")
+write_rds(valores_distritos, "val_distritos.rds")
 ```
 
 #Creación de tablas con valores mensuales para cada distrito
@@ -141,14 +150,14 @@ write_csv(valores_distritos, "val_distritos.csv")
 ```{r}
 valores_distritos_mes <- tbl_month_id %>% 
   left_join(seleccionDistritos, by = "id") %>% 
-  group_by(Year, Month, Model, Scenario, nombre) %>% 
+  group_by(Year, Month, Model, Scenario, nombre, nom_cant, coddistful) %>% 
   summarise(t_mean = mean(tas_month), p_mean = mean(pr_month))
 ```
 
 Guardar tabla
 ```{r}
 valores_distritos_mes$nombre <- str_to_title(as.character(valores_distritos_mes$nombre))
-valores_distritos_mes <- rename(valores_distritos_mes, distrito = nombre)
+valores_distritos_mes <- valores_distritos_mes %>% rename(distrito = nombre, canton = nom_cant)
 saveRDS(valores_distritos_mes, "val_distritos_mes.rds")
 ```
 
