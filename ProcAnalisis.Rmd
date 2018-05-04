@@ -102,7 +102,11 @@ distritos_mapa <- distritos %>%
 distritos_mapa$canton <- str_to_title(as.character(distritos_mapa$canton))
 distritos_mapa$distrito <- str_to_title(as.character(distritos_mapa$distrito))
 
-st_write(distritos_mapa, "distritos_mapa.json", driver = "GeoJSON")
+distritos <- st_read("distritos_mapa.json")
+
+distritos_mapa_simple <- rmapshaper::ms_simplify(distritos)
+
+st_write(distritos_mapa_simple, "distritos_mapa.json", driver = "GeoJSON")
 ```
 
 
