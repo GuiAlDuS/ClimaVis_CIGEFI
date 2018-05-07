@@ -110,8 +110,8 @@ server <- function(input, output) {
                 )
   })
   
-  #funciones de selección
   
+  #funciones de selección
   seleccion <- reactive({
     val_distritos[distrito == input$distritos &
                     canton == input$canton &
@@ -132,21 +132,21 @@ server <- function(input, output) {
                         Year >= input$aNo[1] & Year <= input$aNo[2]]
   })
 
-  table_mapa <- reactive({
+  table_mapa <- reactive ({
     val_distritos[
-      Model %in% input$modelos &
-        Scenario == input$cp & 
-        Year >= input$aNo[1] & Year <= input$aNo[2]
-      , .(t_mean_y = mean(t_mean_y), p_mean_y = mean(p_y))
-      , by = coddistful]
+    Model %in% input$modelos &
+      Scenario == input$cp & 
+      Year >= input$aNo[1] & Year <= input$aNo[2]
+    , .(t_mean_y = mean(t_mean_y), p_mean_y = mean(p_y))
+    , by = coddistful]
   })
   
-  mapa_datos <- reactive({
+  mapa_datos <- reactive ({
     distritos %>% left_join(table_mapa(), by = "coddistful")
   })
   
-  mapa_sel_distrito <- reactive({
-    mapa_datos() %>% filter(coddistful == sel_distrito$coddistful)
+  mapa_sel_distrito <- reactive ({
+    mapa_datos() %>% filter(coddistful == sel_distrito()$coddistful)
   })
   
   t_outliers <- reactive ({
@@ -172,16 +172,6 @@ server <- function(input, output) {
       filter(p_mean > upper.limit | p_mean < lower.limit) %>% 
       mutate(tooltip = paste0("Año ", Year))
   })
-  
-  
-  pal_p <- colorNumeric(
-    palette = "YlGnBu",
-    domain = val_distritos$p_y)
-  
-  pal_t <- colorNumeric(
-    palette = "Oranges",
-    domain = val_distritos$t_mean_y)
-  
   
   #graficos
   output$TaNo <- renderPlot({
@@ -235,45 +225,77 @@ server <- function(input, output) {
 #            selected_css = "fill:red;", width = 1)
   })
   
-  output$mapaTemp <- renderLeaflet({
-    
-    leaflet(mapa_datos()) %>% 
-      addTiles() %>%
-      addPolygons(
-        fillColor = ~pal_t(t_mean_y),
-        weight = 1,
-        opacity = 1,
-        color = "white",
-        dashArray = "3",
-        fillOpacity = 0.7,
-        label = ~t_mean_y
-        ) %>% 
-      setView(lng=-85.186, lat=10.451, zoom = 8) %>% 
-      addLegend(pal = pal_t, values = ~t_mean_y, opacity = 0.7, title = "°C", position = "bottomleft")
-  })
-
- # observe({
- #   leafletProxy(mapaTemp, data = mapa_sel_distrito()) %>% 
-#      addPolylines(
-#      stroke = TRUE, 
-#      fillOpacity = 0,
-#      weight = 4,
-#      color = "black"
-#    )
-#  })
+  pal_p <- colorNumeric(
+    palette = "YlGnBu",
+    domain = val_distritos$p_y)
   
-  output$mapaPrecip <- renderLeaflet({
-    leaflet(mapa_datos()) %>% 
-      addTiles() %>%
+  pal_t <- colorNumeric(
+    palette = "Oranges",
+    domain = val_distritos$t_mean_y)
+  
+  mapa_base <- leaflet() %>% addTiles() %>% setView(lng=-85.186, lat=10.451, zoom = 8)
+  
+  output$mapaTemp <- renderLeaflet(mapa_base)
+  
+observe({
+  leafletProxy("mapaTemp", data = table_mapa()) %>%
+    clearShapes() %>% 
+    clearControls() %>% 
+    addPolygons(
+      data =  mapa_datos(),
+      fillColor = ~pal_t(t_mean_y),
+      weight = 1,
+      opacity = 1,
+      color = "white",
+      dashArray = "3",
+      fillOpacity = 0.7
+    ) %>%
+    addLegend(pal = pal_t, values = ~t_mean_y, opacity = 0.7, title = "°C", position = "bottomleft")
+})
+
+observe({
+  if (input$canton != ""){
+    leafletProxy("mapaTemp", data = seleccion()) %>% 
+      removeShape("borde") %>% 
+      addPolylines(
+        layerId = "borde",
+        data = mapa_sel_distrito(),
+        stroke = TRUE,
+        weight = 4,
+        color = "black"
+      )
+  }
+})
+  
+  output$mapaPrecip <- renderLeaflet(mapa_base)
+  observe({
+    leafletProxy("mapaPrecip", data = table_mapa()) %>%
+      clearShapes() %>% 
+      clearControls() %>% 
       addPolygons(
+        data =  mapa_datos(),
         fillColor = ~pal_p(p_mean_y),
         weight = 1,
         opacity = 1,
         color = "white",
         dashArray = "3",
-        fillOpacity = 0.7) %>% 
-      setView(lng=-85.186, lat=10.451, zoom = 8) %>% 
+        fillOpacity = 0.7
+      ) %>%
       addLegend(pal = pal_p, values = ~p_mean_y, opacity = 0.7, title = "mm", position = "bottomleft")
+  })
+  
+  observe({
+    if (input$canton != ""){
+      leafletProxy("mapaPrecip", data = seleccion()) %>% 
+        removeShape("borde") %>% 
+        addPolylines(
+          layerId = "borde",
+          data = mapa_sel_distrito(),
+          stroke = TRUE,
+          weight = 4,
+          color = "black"
+        )
+    }
   })
 }
 
