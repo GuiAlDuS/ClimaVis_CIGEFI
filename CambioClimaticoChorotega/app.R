@@ -4,7 +4,7 @@ library(shinyWidgets)
 library(magrittr)
 library(dplyr)
 library(ggplot2)
-library(ggiraph)
+#library(ggiraph)
 library(data.table)
 library(sf)
 library(leaflet)
@@ -13,7 +13,8 @@ library(leaflet)
 dist_cant <- fread("distritos_cantones.csv")
 val_distritos <- data.table(readRDS("val_distritos.rds"))
 val_distritos_mes <- data.table(readRDS("val_distritos_mes.rds"))
-distritos <- st_read("distritos_mapa.json")
+distritos <- st_read("distritos_mapa.shp")
+distritos$coddistful <- as.character(distritos$coddistful)
 
 GCMs <- list("ccsm4_r1i1p1", 
      "ccsm4_r2i1p1", 
@@ -29,8 +30,7 @@ GCMs <- list("ccsm4_r1i1p1",
      "mpi_esm_lr_r3i1p1")
 
 #Funciones
-
-
+    
 # UI de dashboard
 ui <- dashboardPage(
   skin = "blue",
@@ -48,7 +48,8 @@ ui <- dashboardPage(
           status = "primary",
           width = 5,
           selectInput("canton", label = "Seleccionar cantón:", 
-                      choices = sort(dist_cant$canton)
+                      choices = sort(dist_cant$canton),
+                      selected = sort(dist_cant$canton)[[1]]
                       ),
           sidebarMenuOutput("distr"),
           radioButtons("cp", "Seleccionar escenario de emisiones:",
@@ -72,7 +73,7 @@ ui <- dashboardPage(
       tabBox(
         side = "right",
         title = "Temperatura", id = "temperatura", width = 7, selected = "Anual", 
-        tabPanel("Mensual", ggiraphOutput("Tmes")
+        tabPanel("Mensual", plotOutput("Tmes")
                  ),
         tabPanel("Anual", plotOutput("TaNo")
         )
@@ -89,7 +90,7 @@ ui <- dashboardPage(
       tabBox(
         side = "right",
         title = "Lluvia", id = "precip", width = 7, selected = "Anual",
-      tabPanel("Mensual", ggiraphOutput("Pmes")
+      tabPanel("Mensual", plotOutput("Pmes")
                ),
       tabPanel("Anual", plotOutput("PaNo")
       )
@@ -120,6 +121,9 @@ server <- function(input, output) {
                     Year <= input$aNo[2]]
   })
   
+  sel_distrito <- reactive({seleccion()[1, .(distrito, canton, coddistful)]
+  })
+  
   sel_mes <- reactive({
     val_distritos_mes[distrito == input$distritos &
                         canton == input$canton &
@@ -128,7 +132,7 @@ server <- function(input, output) {
                         Year >= input$aNo[1] & Year <= input$aNo[2]]
   })
 
-  mapa_table <- reactive({
+  table_mapa <- reactive({
     val_distritos[
       Model %in% input$modelos &
         Scenario == input$cp & 
@@ -138,7 +142,11 @@ server <- function(input, output) {
   })
   
   mapa_datos <- reactive({
-    distritos %>% left_join(mapa_table(), by = "coddistful")
+    distritos %>% left_join(table_mapa(), by = "coddistful")
+  })
+  
+  mapa_sel_distrito <- reactive({
+    mapa_datos() %>% filter(coddistful == sel_distrito$coddistful)
   })
   
   t_outliers <- reactive ({
@@ -165,6 +173,16 @@ server <- function(input, output) {
       mutate(tooltip = paste0("Año ", Year))
   })
   
+  
+  pal_p <- colorNumeric(
+    palette = "YlGnBu",
+    domain = val_distritos$p_y)
+  
+  pal_t <- colorNumeric(
+    palette = "Oranges",
+    domain = val_distritos$t_mean_y)
+  
+  
   #graficos
   output$TaNo <- renderPlot({
     ggplot() + 
@@ -180,20 +198,16 @@ server <- function(input, output) {
 #            selected_css = "fill:red;", width = 1)
     })
   
-  output$Tmes <- renderggiraph({
-    g_temp <- ggplot() + 
+  output$Tmes <- renderPlot({
+    ggplot() + 
       geom_boxplot(data = sel_mes(), aes(x = Month, y = t_mean, group = Month), outlier.shape = NA, fill = "lightyellow") +
-      geom_point_interactive(data = t_outliers(), 
-                             aes(x = Month, y = t_mean, colour = Model, 
-                                 group = Month, tooltip = t_outliers()$tooltip), alpha = 0.7) +
+      geom_point(data = t_outliers(), 
+                 aes(x = Month, y = t_mean, colour = Model, 
+                     group = Month), alpha = 0.7) +
       scale_x_continuous(breaks=seq(1,12,1), labels=c("Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Set","Oct","Nov","Dic")) +
       labs(x = "Mes", y = "Promedio de temperatura (C)") +
       scale_colour_discrete(name="Modelos") +
       theme(legend.position = "bottom")
-    ggiraph(code = print(g_temp),
-            hover_css = "fill:red;cursor:pointer;",
-            selection_type = "single",
-            selected_css = "fill:red;", width = 1)
   })
   
   output$PaNo <- renderPlot({
@@ -205,57 +219,61 @@ server <- function(input, output) {
       theme(legend.position = "bottom")
   })
   
-  output$Pmes <- renderggiraph({
-    g_prec <- ggplot() + 
+  output$Pmes <- renderPlot({
+    ggplot() + 
       geom_boxplot(data = sel_mes(), aes(x = Month, y = p_mean, group = Month), outlier.shape = NA, fill = "lightyellow") +
-      geom_point_interactive(data = p_outliers(), 
+      geom_point(data = p_outliers(), 
                              aes(x = Month, y = p_mean, colour = Model, 
-                                 group = Month, tooltip = p_outliers()$tooltip), alpha = 0.7) +
+                                 group = Month), alpha = 0.7) +
       scale_x_continuous(breaks=seq(1,12,1), labels=c("Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Set","Oct","Nov","Dic")) +
       labs(x = "Mes", y = "Total de lluvia (mm)") +
       scale_colour_discrete(name="Modelos") +
       theme(legend.position = "bottom")
-    ggiraph(code = print(g_prec), 
-            hover_css = "fill:red;cursor:pointer;",
-            selection_type = "single",
-            selected_css = "fill:red;", width = 1)
+#    ggiraph(code = print(g_prec), 
+#            hover_css = "fill:red;cursor:pointer;",
+#            selection_type = "single",
+#            selected_css = "fill:red;", width = 1)
   })
   
   output$mapaTemp <- renderLeaflet({
-    pal <- colorNumeric(
-      palette = "Oranges",
-      domain = mapa_datos()$t_mean_y)
     
     leaflet(mapa_datos()) %>% 
       addTiles() %>%
       addPolygons(
-        fillColor = ~pal(t_mean_y),
+        fillColor = ~pal_t(t_mean_y),
         weight = 1,
         opacity = 1,
         color = "white",
         dashArray = "3",
         fillOpacity = 0.7,
-        label = ~t_mean_y) %>% 
+        label = ~t_mean_y
+        ) %>% 
       setView(lng=-85.186, lat=10.451, zoom = 8) %>% 
-      addLegend(pal = pal, values = ~t_mean_y, opacity = 0.7, title = "C", position = "bottomleft")
+      addLegend(pal = pal_t, values = ~t_mean_y, opacity = 0.7, title = "°C", position = "bottomleft")
   })
+
+ # observe({
+ #   leafletProxy(mapaTemp, data = mapa_sel_distrito()) %>% 
+#      addPolylines(
+#      stroke = TRUE, 
+#      fillOpacity = 0,
+#      weight = 4,
+#      color = "black"
+#    )
+#  })
   
   output$mapaPrecip <- renderLeaflet({
-    pal <- colorNumeric(
-      palette = "Blues",
-      domain = mapa_datos()$p_mean_y)
-    
     leaflet(mapa_datos()) %>% 
       addTiles() %>%
       addPolygons(
-        fillColor = ~pal(p_mean_y),
+        fillColor = ~pal_p(p_mean_y),
         weight = 1,
         opacity = 1,
         color = "white",
         dashArray = "3",
         fillOpacity = 0.7) %>% 
       setView(lng=-85.186, lat=10.451, zoom = 8) %>% 
-      addLegend(pal = pal, values = ~p_mean_y, opacity = 0.7, title = "mm", position = "bottomleft")
+      addLegend(pal = pal_p, values = ~p_mean_y, opacity = 0.7, title = "mm", position = "bottomleft")
   })
 }
 
