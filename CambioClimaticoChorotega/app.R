@@ -29,8 +29,6 @@ GCMs <- list("ccsm4_r1i1p1",
      "mpi_esm_lr_r2i1p1",
      "mpi_esm_lr_r3i1p1")
 
-#Funciones
-    
 # UI de dashboard
 ui <- dashboardPage(
   skin = "blue",
@@ -82,9 +80,11 @@ ui <- dashboardPage(
     fluidRow(
       tabBox(
         id = "mapa", width = 5, 
-        tabPanel("Temperatura", leafletOutput("mapaTemp")
+        tabPanel("Temperatura", leafletOutput("mapaTemp"),
+                 ("Mapa del promedio de temperatura por distrito para el periódo de tiempo seleccionado.")
                  ),
-        tabPanel("Lluvia", leafletOutput("mapaPrecip")
+        tabPanel("Lluvia", leafletOutput("mapaPrecip"),
+                 ("Mapa del promedio de lluvia anual por distrito para el periódo de tiempo seleccionado.")
                  )
         ),
       tabBox(
@@ -94,6 +94,23 @@ ui <- dashboardPage(
                ),
       tabPanel("Anual", plotOutput("PaNo")
       )
+      )
+    ),
+    fluidRow(
+      box( width = 12,
+           p(tags$strong("Notas sobre la herramienta:")),
+           ("- Los GCMs utilizados se seleccionaron con base en el estudio"),tags$a(href="http://onlinelibrary.wiley.com/doi/10.1002/joc.4216/abstract", tags$i("Skill of CMIP5 climate models in reproducing 20th century basic climate features in Central America")), 
+           ("de Hidalgo y Alfaro (2015)."),
+           tags$br(),
+           ("- Los calculos de los valores de cada distrito se hicieron con base en GCMs reducidos en escala a 5km x 5km. La reducción de escala también fue realizada por Hidalgo y Alfaro."),
+           tags$br(),
+           ("- "), tags$a(href="http://www.oscc.gob.es/es/general/salud_cambio_climatico/Nuevos_escenarios_emision_RCPs.htm", "En este enlace"),(" se encuentra información en español sobre los escenarios"), tags$i("Representative Concentration Pathways"),("(RCP) del Quinto Informe del IPCC."),
+           tags$br(),
+           ("- El código de la herramienta se encuentra disponible en"), tags$a(href="https://github.com/GuiAlDuS", "GitHub"), ("."),
+           p(""),
+           ("Esta herramienta fue desarrollada en el"),  tags$a(href="http://www.cigefi.ucr.ac.cr/", "Centro de Investigaciones Geofísicas de la Universidad de Costa Rica (CIGEFI)"), ("por Guillermo Durán, Erick Alfaro y Hugo Hidalgo."),
+           tags$br(),
+           ("Última actualización 7-5-2018.")
       )
     )
   )
@@ -109,7 +126,6 @@ server <- function(input, output) {
                 choices = sort(mydata$distrito)
                 )
   })
-  
   
   #funciones de selección
   seleccion <- reactive({
@@ -237,38 +253,56 @@ server <- function(input, output) {
   
   output$mapaTemp <- renderLeaflet(mapa_base)
   
-observe({
-  leafletProxy("mapaTemp", data = table_mapa()) %>%
-    clearShapes() %>% 
-    clearControls() %>% 
-    addPolygons(
-      data =  mapa_datos(),
-      fillColor = ~pal_t(t_mean_y),
-      weight = 1,
-      opacity = 1,
-      color = "white",
-      dashArray = "3",
-      fillOpacity = 0.7
-    ) %>%
-    addLegend(pal = pal_t, values = ~t_mean_y, opacity = 0.7, title = "°C", position = "bottomleft")
-})
-
-observe({
-  if (input$canton != ""){
-    leafletProxy("mapaTemp", data = seleccion()) %>% 
-      removeShape("borde") %>% 
-      addPolylines(
-        layerId = "borde",
-        data = mapa_sel_distrito(),
-        stroke = TRUE,
-        weight = 4,
-        color = "black"
-      )
-  }
-})
+  observe({
+    leafletProxy("mapaTemp", data = table_mapa()) %>%
+      clearShapes() %>% 
+      clearControls() %>% 
+      addPolygons(
+        data =  mapa_datos(),
+        fillColor = ~pal_t(t_mean_y),
+        weight = 1,
+        opacity = 1,
+        color = "white",
+        dashArray = "3",
+        fillOpacity = 0.7
+      ) %>%
+      addLegend(pal = pal_t, values = ~t_mean_y, opacity = 0.7, title = "°C", position = "bottomleft")
+  })
+  
+  observe({
+    if (input$canton != "" & input$aNo[1] > 0 & input$cp != ""){
+      leafletProxy("mapaTemp", data = seleccion()) %>% 
+        removeShape("borde") %>% 
+        addPolylines(
+          layerId = "borde",
+          data = mapa_sel_distrito(),
+          stroke = TRUE,
+          weight = 4,
+          color = "red"
+        )
+    } 
+  })
   
   output$mapaPrecip <- renderLeaflet(mapa_base)
+  #if (input$canton == ""){
+    
+  #}
+  #output$mapaPrecip <- renderLeaflet(leaflet(mapa_datos()) %>% 
+   #                                    addTiles() %>% 
+  #                                     setView(lng=-85.186, lat=10.451, zoom = 8) %>% 
+  #                                     addPolygons(
+  #                                       fillColor = ~pal_p(p_mean_y),
+  #                                       weight = 1,
+  #                                       opacity = 1,
+  #                                       color = "white",
+  #                                       dashArray = "3",
+  #                                       fillOpacity = 0.7
+  #                                     ) %>%
+  #                                     addLegend(pal = pal_p, values = ~p_mean_y, opacity = 0.7, title = "mm", position = "bottomleft")
+   #                                  )
+  
   observe({
+#    if (input$canton == "" & input$aNo[1] > 0 & input$cp != ""){
     leafletProxy("mapaPrecip", data = table_mapa()) %>%
       clearShapes() %>% 
       clearControls() %>% 
@@ -282,10 +316,11 @@ observe({
         fillOpacity = 0.7
       ) %>%
       addLegend(pal = pal_p, values = ~p_mean_y, opacity = 0.7, title = "mm", position = "bottomleft")
+#    }
   })
   
   observe({
-    if (input$canton != ""){
+    if (input$canton != "" & input$aNo[1] > 0 & input$cp != ""){
       leafletProxy("mapaPrecip", data = seleccion()) %>% 
         removeShape("borde") %>% 
         addPolylines(
@@ -293,9 +328,9 @@ observe({
           data = mapa_sel_distrito(),
           stroke = TRUE,
           weight = 4,
-          color = "black"
+          color = "red"
         )
-    }
+    } 
   })
 }
 
